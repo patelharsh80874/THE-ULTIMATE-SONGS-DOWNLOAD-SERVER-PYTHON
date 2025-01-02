@@ -1,9 +1,11 @@
-from flask import Flask, request, jsonify, send_file ,render_template
+from flask import Flask, request, jsonify, send_file
 import requests
 import logging
 from mutagen.mp4 import MP4, MP4Cover
-from pathlib import Path  # Added for cross-platform path handling
-from flask_cors import CORS 
+from pathlib import Path
+from flask_cors import CORS
+from PIL import Image
+import io
 
 app = Flask(__name__)
 CORS(app)
@@ -28,6 +30,28 @@ def download_song():
         
         logger.info(f"Downloading song: {song_name} by {artist}")
 
+        # Validate and fetch the image
+        image_content = None
+        if image_url:
+            try:
+                image_response = requests.get(image_url, timeout=10)
+                image_response.raise_for_status()
+
+                # Check if the image can be opened
+                image_bytes = io.BytesIO(image_response.content)
+                with Image.open(image_bytes) as img:
+                    if img.format == "WEBP":
+                        img = img.convert("RGB")
+                        converted_image = io.BytesIO()
+                        img.save(converted_image, format="JPEG")
+                        converted_image.seek(0)
+                        image_content = converted_image.read()
+                    else:
+                        image_content = image_response.content
+            except Exception as e:
+                logger.error(f"Invalid image URL or failed to fetch image: {e}")
+                return jsonify({"error": "Invalid or inaccessible image URL"}), 400
+
         # Create file path using pathlib for cross-platform compatibility
         tmp_dir = Path('/tmp')
         if not tmp_dir.exists():
@@ -47,55 +71,22 @@ def download_song():
                 f.write(chunk)
 
         # Add metadata with cover art
-        song_info = {
-            'name': song_name,
-            'artist_map': {'artists': [{'name': artist}]},
-            'album': album,
-            'year': year,
-            'image': [{"link": image_url}] if image_url else [],
-        }
-
-        def add_metadata_with_cover(file_path, song_info):
-            """Add metadata including cover art and lyrics to the M4A file."""
+        def add_metadata_with_cover(file_path, image_content):
+            """Add metadata including cover art to the M4A file."""
             try:
                 audio = MP4(file_path)
 
-                # Add title metadata
-                audio.tags['\xa9nam'] = [song_info.get('name', 'Unknown')]
-
-                # Add artist metadata
-                artists = song_info.get("artist_map", {}).get("artists", [])
-                artist = artists[0].get("name", "Unknown") if artists else "Unknown"
+                # Add metadata
+                audio.tags['\xa9nam'] = [song_name]
                 audio.tags['\xa9ART'] = [artist]
+                audio.tags['\xa9alb'] = [album]
+                audio.tags['\xa9day'] = [year]
 
-                # Add album metadata
-                album = song_info.get('album', {})
-                album_name = album.get('name', 'Unknown') if isinstance(album, dict) else album
-                audio.tags['\xa9alb'] = [album_name]
+                # Add cover art
+                if image_content:
+                    cover_data = MP4Cover(image_content, MP4Cover.FORMAT_JPEG)
+                    audio.tags['covr'] = [cover_data]
 
-                # Add year metadata
-                audio.tags['\xa9day'] = [song_info.get('year', 'Unknown')]  # Year tag
-
-                # Add cover art metadata
-                if song_info.get('image'):
-                    try:
-                        image_data = song_info['image']
-                        if isinstance(image_data, list) and image_data:
-                            image_url = image_data[-1].get('link')
-                            if image_url:
-                                image_response = requests.get(image_url)
-                                image_response.raise_for_status()
-
-                                cover_data = MP4Cover(
-                                    image_response.content,
-                                    imageformat=MP4Cover.FORMAT_JPEG if image_url.lower().endswith(('.jpg', '.jpeg'))
-                                    else MP4Cover.FORMAT_PNG
-                                )
-                                audio.tags['covr'] = [cover_data]
-                    except Exception as e:
-                        logger.error(f"Error adding cover art: {e}")
-
-                # Save metadata
                 audio.save()
                 logger.info(f"Metadata added to {file_path}")
                 return True
@@ -104,7 +95,7 @@ def download_song():
                 logger.error(f"Error adding metadata: {e}")
                 return False
 
-        if not add_metadata_with_cover(str(file_path), song_info):
+        if not add_metadata_with_cover(str(file_path), image_content):
             logger.warning("Failed to add metadata to the file")
 
         try:
@@ -234,6 +225,15 @@ def index():
         align-items: center;
         justify-content: center;
         gap:1vw;
+        }
+
+        @media only screen and (max-width: 600px) {
+              #message {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 600;
+        }
         }
     </style>
 </head>
