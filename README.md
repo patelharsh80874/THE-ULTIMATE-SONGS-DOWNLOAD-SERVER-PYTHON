@@ -32,7 +32,7 @@ A Flask-based server application that allows users to download songs with embedd
 | Parameter   | Type   | Description                                                |
 |-------------|--------|------------------------------------------------------------|
 | `audioUrl`  | String | URL of the audio file to download.                         |
-| `imageUrl`  | String | URL of the album cover image.                              |
+| `imageUrl`  | String | URL of the album cover image (supports `.webp`).           |
 | `songName`  | String | Name of the song.                                          |
 | `artist`    | String | Artist of the song.                                        |
 | `album`     | String | Album name of the song.                                    |
